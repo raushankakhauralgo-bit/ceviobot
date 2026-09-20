@@ -65,6 +65,7 @@ const Api = {
 
   me() { return this.request('/me'); },
   discoverChannels(page = 1, sort = 'popular') { return this.request('/discover/channels', { params: { page, sort } }); },
+  discoverChannel(id) { return this.request(`/discover/channels/${id}`); },
   memberships(page = 1) { return this.request('/memberships', { params: { page } }); },
   transactions(page = 1) { return this.request('/transactions', { params: { page } }); },
 

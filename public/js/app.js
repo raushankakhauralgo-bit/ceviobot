@@ -193,36 +193,55 @@ const VIEWS = {
     const sort = pages.discoverSort || 'popular';
     const page = pages.discover || 1;
     const data = await Api.discoverChannels(page, sort);
-    content.innerHTML = `
-      <div class="discover-toolbar">
-        <select id="discover-sort">
-          <option value="popular">Most Popular</option>
-          <option value="newest">Newest First</option>
-          <option value="oldest">Oldest First</option>
-          <option value="price_low">Price: Low to High</option>
-          <option value="price_high">Price: High to Low</option>
-          <option value="free">Free Channels</option>
-        </select>
-      </div>` + (!data.channels.length ? '<div class="empty-state">No channels found.</div>' : `
-      <div class="channel-card-grid">${data.channels.map(function (c) {
+    const sorts = [
+      ['popular', 'flame', 'Most Popular'],
+      ['newest', 'sparkles', 'Newest'],
+      ['oldest', 'history', 'Oldest'],
+      ['price_low', 'arrow-down-narrow-wide', 'Price: Low'],
+      ['price_high', 'arrow-up-wide-narrow', 'Price: High'],
+      ['free', 'gift', 'Free'],
+    ];
+    const toolbar = `
+      <div class="discover-head">
+        <div class="discover-count">${data.total || 0} channel${data.total === 1 ? '' : 's'}</div>
+        <div class="sort-chips" role="tablist" aria-label="Sort channels">
+          ${sorts.map(function (o) {
+            return `<button type="button" class="sort-chip ${o[0] === sort ? 'active' : ''}" data-sort="${o[0]}"><i data-lucide="${o[1]}"></i><span>${o[2]}</span></button>`;
+          }).join('')}
+        </div>
+      </div>`;
+    content.innerHTML = toolbar + (!data.channels.length ? '<div class="empty-state">No channels found.</div>' : `
+      <div class="channel-card-grid">${data.channels.map(function (c, i) {
         const name = c.username ? '@' + esc(c.username) : esc(c.channel_name);
-        const price = c.price ? money(c.price) + '/' + esc(c.plan_type) : 'Free';
-        return `<div class="channel-card">
-          <div class="ch-icon"><i data-lucide="tv"></i></div>
+        const isFree = !c.price;
+        const price = isFree ? 'Free' : money(c.price) + '<small>/' + esc(c.plan_type) + '</small>';
+        return `<div class="channel-card" tabindex="0" role="button" data-ch-idx="${i}" style="animation-delay:${i * 0.04}s">
+          <div class="ch-top">
+            <div class="ch-icon"><i data-lucide="tv"></i></div>
+            <span class="ch-price ${isFree ? 'free' : ''}">${price}</span>
+          </div>
           <div class="ch-name">${name}</div>
-          <div class="ch-category">${esc(c.category) || 'General'}</div>
+          <div class="ch-category"><i data-lucide="tag"></i>${esc(c.category) || 'General'}</div>
           <div class="ch-meta">
-            <span class="ch-members"><i data-lucide="users"></i> ${c.member_count || 0}</span>
-            <span class="ch-price">${price}</span>
+            <span class="ch-members"><i data-lucide="users"></i> ${c.member_count || 0} member${c.member_count === 1 ? '' : 's'}</span>
+            <span class="ch-view">View details <i data-lucide="arrow-right"></i></span>
           </div>
         </div>`;
       }).join('')}</div>
       ${paginationHTML('discover', page, data.total)}`);
-    document.getElementById('discover-sort').value = sort;
-    document.getElementById('discover-sort').addEventListener('change', function (e) {
-      pages.discoverSort = e.target.value;
-      pages.discover = 1;
-      loadView('discover');
+    content.querySelectorAll('.sort-chip').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const next = btn.getAttribute('data-sort');
+        if (next === sort) return;
+        pages.discoverSort = next;
+        pages.discover = 1;
+        loadView('discover');
+      });
+    });
+    content.querySelectorAll('[data-ch-idx]').forEach(function (card) {
+      function open() { openChannelModal(data.channels[parseInt(card.getAttribute('data-ch-idx'), 10)]); }
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
     });
     bindPagination();
   },
@@ -623,6 +642,92 @@ function openMembershipDetail(m) {
     rows.push(drow('Cancel Reason', esc(m.cancel_reason) || '—'));
   }
   openDetail('Membership Details', rows.join(''), null, 'package');
+}
+
+// ---------- Discover: channel detail popup (full details + join link) ----------
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  return new Promise(function (resolve, reject) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy') ? resolve() : reject(); } catch (e) { reject(e); } finally { document.body.removeChild(ta); }
+  });
+}
+
+function openChannelModal(c) {
+  const name = c.username ? '@' + c.username : c.channel_name;
+  modalRoot.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box channel-modal">
+        <div class="cm-head">
+          <div class="ch-icon"><i data-lucide="tv"></i></div>
+          <div class="cm-title">
+            <h3>${esc(name)}</h3>
+            <div class="cm-sub">${esc(c.channel_name)}</div>
+          </div>
+        </div>
+        <div id="cm-body"><div class="loading" style="padding:34px 10px;"><div class="spinner"></div><span>Loading details…</span></div></div>
+        <div class="modal-actions" id="cm-actions"><button type="button" class="btn" id="modal-cancel">Close</button></div>
+      </div>
+    </div>`;
+  if (window.lucide) lucide.createIcons();
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('modal-overlay').addEventListener('click', function (e) { if (e.target.id === 'modal-overlay') closeModal(); });
+
+  Api.discoverChannel(c.channel_id).then(function (d) {
+    const ch = d.channel, plans = d.plans || [];
+    const body = document.getElementById('cm-body');
+    if (!body) return; // modal was closed meanwhile
+    const plansHtml = plans.length
+      ? plans.map(function (p) {
+          const free = !p.price;
+          return `<div class="plan-row">
+            <div><div class="plan-name">${esc(p.plan_name || p.plan_type)}</div>
+            <div class="plan-sub">${esc(p.plan_type)}${p.trial_days ? ' · ' + p.trial_days + '-day free trial' : ''}</div></div>
+            <div class="plan-price ${free ? 'free' : ''}">${free ? 'Free' : money(p.price)}</div>
+          </div>`;
+        }).join('')
+      : '<div class="plan-sub">No active plans yet.</div>';
+    body.innerHTML = `
+      <div class="cm-stats">
+        <div><span>Members</span><b>${ch.member_count || 0}</b></div>
+        <div><span>Category</span><b>${esc(ch.category) || 'General'}</b></div>
+        <div><span>Type</span><b style="text-transform:capitalize;">${esc(ch.type) || 'public'}</b></div>
+      </div>
+      ${ch.description ? `<p class="cm-desc">${esc(ch.description)}</p>` : ''}
+      <dl class="detail-grid">
+        ${drow('Channel', esc(ch.channel_name))}
+        ${ch.username ? drow('Username', '@' + esc(ch.username)) : ''}
+        ${drow('Created', ch.created_at ? fmtDate(ch.created_at) : '—')}
+      </dl>
+      <div class="cm-section">Available Plans</div>
+      <div class="plan-list">${plansHtml}</div>
+      ${d.join_link ? `
+        <div class="cm-section">Join Link</div>
+        <div class="join-box">
+          <code id="join-link-text">${esc(d.join_link)}</code>
+          <button type="button" class="btn" id="copy-join"><i data-lucide="copy"></i> Copy</button>
+        </div>` : '<div class="plan-sub" style="margin-top:14px;">Join link is not available right now.</div>'}`;
+    if (d.join_link) {
+      document.getElementById('cm-actions').innerHTML = `
+        <button type="button" class="btn" id="modal-cancel">Close</button>
+        <a class="btn btn-join" href="${esc(d.join_link)}" target="_blank" rel="noopener noreferrer"><i data-lucide="send"></i> Join / Subscribe</a>`;
+      document.getElementById('modal-cancel').addEventListener('click', closeModal);
+      document.getElementById('copy-join').addEventListener('click', function () {
+        const btn = this;
+        copyText(d.join_link).then(function () {
+          btn.innerHTML = '<i data-lucide="check"></i> Copied';
+          if (window.lucide) lucide.createIcons();
+          setTimeout(function () { btn.innerHTML = '<i data-lucide="copy"></i> Copy'; if (window.lucide) lucide.createIcons(); }, 1800);
+        }).catch(function () {});
+      });
+    }
+    if (window.lucide) lucide.createIcons();
+  }).catch(function (err) {
+    const body = document.getElementById('cm-body');
+    if (body) body.innerHTML = `<div class="empty-state" style="padding:24px 10px;">${esc(err.message === 'HTTP_404' ? 'Channel not found.' : (err.message || 'Could not load details.'))}</div>`;
+  });
 }
 
 function openTransactionDetail(t) {
