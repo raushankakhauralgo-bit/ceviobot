@@ -174,7 +174,7 @@ const VIEWS = {
     content.innerHTML = `
       <div class="stat-grid">
         <div class="stat-card"><div class="label">Name</div><div class="value">${esc(me.full_name) || '—'}</div></div>
-        <div class="stat-card"><div class="label">Username</div><div class="value">@${esc(me.username) || '—'}</div></div>
+        ${me.username ? `<div class="stat-card"><div class="label">Username</div><div class="value">@${esc(me.username)}</div></div>` : ""}
         <div class="stat-card"><div class="label">Active Plans</div><div class="value accent">${me.active_plans}</div></div>
         <div class="stat-card"><div class="label">Joined</div><div class="value" style="font-size:16px;">${joinedDate}<div style="color:var(--text-dim);font-size:12px;font-weight:400;margin-top:2px;">${joinedTime}</div></div></div>
       </div>
